@@ -2,7 +2,6 @@
 
 import cv2
 import math
-from .display_text import draw_center_text
 
 NOTE_MAP = {
     'C3': 48, 'D3': 50, 'E3': 52, 'F3': 53, 'G3': 55, 'A3': 57, 'B3': 59,
@@ -34,6 +33,8 @@ class Keyboard:
         self.key_radius = 28
         self.hit_threshold = 45
 
+        self.key_states = {note: False for note in self.notes_order}
+
     def build_keyboard(self, table_rect):
         """
         依照桌面的 x, w 動態生成 15 顆圓形鍵盤位置
@@ -47,16 +48,38 @@ class Keyboard:
             cx = int(x + (i + 0.5) * step)
             self.key_centers.append((cx, key_y, note))
 
-    def check_pressed(self, finger_positions):
-        states = [0] * self.num_keys
-        for fp in finger_positions:
-            fx, fy = fp[0], fp[1]
+    # def check_pressed(self, finger_positions):
+    #     states = [0] * self.num_keys
+    #     for fp in finger_positions:
+    #         fx, fy = fp[0], fp[1]
 
-            for i, (kx, ky, note) in enumerate(self.key_centers):
+    #         for i, (kx, ky, note) in enumerate(self.key_centers):
+    #             if math.dist((fx, fy), (kx, ky)) < self.hit_threshold:
+    #                 states[i] = 1
+    #     pressed_notes = [self.notes_order[i] for i, s in enumerate(states) if s == 1]
+    #     return pressed_notes
+
+    def check_pressed(self, finger_positions):
+        newly_pressed = []
+        newly_released = []
+
+        current_pressed = set()
+
+        for fx, fy, _ in finger_positions:
+            for (kx, ky, note) in self.key_centers:
                 if math.dist((fx, fy), (kx, ky)) < self.hit_threshold:
-                    states[i] = 1
-        pressed_notes = [self.notes_order[i] for i, s in enumerate(states) if s == 1]
-        return pressed_notes
+                    current_pressed.add(note)
+
+        for note in self.key_states:
+            if current_pressed.__contains__(note) and not self.key_states[note]:
+                newly_pressed.append(note)
+                self.key_states[note] = True
+
+            elif not current_pressed.__contains__(note) and self.key_states[note]:
+                newly_released.append(note)
+                self.key_states[note] = False
+
+        return newly_pressed, newly_released
 
     def draw(self, frame, pressed_notes, next_note=None):
         """

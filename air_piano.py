@@ -1,5 +1,6 @@
 # air_piano.py
 import cv2
+import time
 from utils.hand_tracker import HandTracker
 from utils.mode_selector import ModeSelector
 from utils.download_ui import DownloadUI
@@ -36,6 +37,9 @@ class AirPiano:
 
         self.practice_idx = 0
         self.practice_notes = []
+
+        self.waiting_hands_up = False
+        self.completed_ui_time = None
 
     def run(self):
         print("Please place your hand on the table for at least 1 second to calibrate.")
@@ -170,16 +174,15 @@ class AirPiano:
             # 4. 取得手指位置（10 指）
             fingers = extract_finger_pixels(left_hand, right_hand, self.frame_w, self.frame_h)
 
-            # 5. 檢查哪些鍵被按下
-            pressed_notes = self.keyboard.check_pressed(fingers)
+            # 5. 檢查鍵盤（事件導向）
+            newly_pressed, newly_released = self.keyboard.check_pressed(fingers)
 
-            # 6.音效播放（多音）
-            self.sound_player.play_notes(pressed_notes)
+            # 6. 聲音：與偵測綁在一起
+            self.sound_player.play_notes(newly_pressed)
+            self.sound_player.stop_notes(newly_released)
 
-            # 停止已放開的鍵
-            all_notes = list(NOTE_MAP.keys())
-            released_notes = [n for n in all_notes if n not in pressed_notes]
-            self.sound_player.stop_notes(released_notes)
+            # 目前仍被按住的鍵（給畫面 / MIDI 用）
+            pressed_notes = [n for n, v in self.keyboard.key_states.items() if v]
 
             # 7.若是錄音模式 → 更新 MIDI
             if self.mode == "record":
@@ -206,8 +209,14 @@ class AirPiano:
                         cv2.imshow("AirPiano", frame)
                         cv2.waitKey(500)  # 短暫顯示一下提示
 
-                # 檢查 Exit / Restart
-                selected = self.exit_ui.check_pressed(fingers)
+                # completed 狀態下，需等待 2 秒後才允許點擊 Exit UI
+                if self.mode == "completed":
+                    if time.time() - self.completed_ui_time >= 2.0:
+                        selected = self.exit_ui.check_pressed(fingers)
+                    else:
+                        selected = None
+                else:
+                    selected = self.exit_ui.check_pressed(fingers)
 
                 if selected == "exit":
                     print("程式結束")
@@ -255,8 +264,7 @@ class AirPiano:
                 # self.keyboard.highlight_note(next_note)
 
                 # 如果使用者按對
-                if next_note in pressed_notes:
-                    self.sound_player.play_notes([next_note])
+                if next_note in newly_pressed:
                     self.practice_idx += 1
 
                     # 如果彈完了，show success
@@ -264,10 +272,16 @@ class AirPiano:
                         draw_center_text(frame, "Song Completed!")
                         cv2.imshow("AirPiano", frame)
                         cv2.waitKey(1500)
-                        self.mode = None
+
+                        # 啟動完成畫面計時（2 秒後才允許互動）
+                        self.mode = "completed"
+                        self.completed_ui_time = time.time()
+                        self.waiting_hands_up = False
+
+                        self.exit_ui.visible = True
+                        self.exit_ui.trigger_time = None
                         continue
 
-                # self.keyboard.draw(frame, pressed_notes)
                 self.keyboard.draw(frame, pressed_notes, next_note)
 
             # 錄音模式 → 錄完可下載 MIDI
